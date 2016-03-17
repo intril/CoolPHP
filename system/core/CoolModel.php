@@ -547,15 +547,19 @@ abstract class CoolModel {
      * @throws CoolException
      */
     private function _make_by_sql ( $by_arr ) {
-        $data_arr = array ();
-        foreach ( $by_arr as $key => $val ) {
-            $val = strtoupper ( $val );
-            if (! in_array ( $val, array ( '', 'ASC', 'DESC' ) )) {
-                throw new CoolException ( CoolException::ERR_SYSTEM, 'Invalid order method(%s)!', $val );
+        if ( is_array ( $by_arr ) ) {
+            $data_arr = array ();
+            foreach ( $by_arr as $key => $val ) {
+                $val = strtoupper ( $val );
+                if (! in_array ( $val, array ( '', 'ASC', 'DESC' ) )) {
+                    throw new CoolException ( CoolException::ERR_SYSTEM, 'Invalid order method(%s)!', $val );
+                }
+                $data_arr [] = ($val === '') ? $key : $key . ' ' . $val;
             }
-            $data_arr [] = ($val === '') ? $key : $key . ' ' . $val;
+            return implode ( ', ', $data_arr );
+        } else {
+            return $by_arr;
         }
-        return implode ( ', ', $data_arr );
     }
 
     /**
