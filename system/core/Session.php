@@ -12,145 +12,125 @@
 class Session {
 
     /**
-     * Namespace - Name of Cool session namespace
-     *
+     * Namespace - Name of Cool session prefix
      * @var string
      */
-    protected $_namespace = "Default";
+    private $_prefix = 'COOL';
 
     /**
      * Variable that defines if session started
-     *
      * @var boolean
      */
-    protected $_session_started = false;
+    private $_started = false;
 
     /**
-     * Constructor - returns an instance object of the session that is named by namespace name
-     *
-     * @param string $namespace - Name of session namespace
+     * Constructor - returns an instance object of the session that is named by prefix name
+     * @param string $prefix - Name of session prefix
      * @param string $sessionId - Optional param for setting session id
      * @return void
-     *
-     * <code>
-     * $session = new Session('mywebsite', $mySessionId)
-     * </code>
      */
-    public function __construct($namespace = 'Default', $session_id = null) {
-        // should not be empty
-        if ($namespace === '') {
-            throw new CoolException ( 'Namespace cant be empty string.' );
-        }
+    public function __construct ( $prefix ) {
         // should not start with underscore
-        if ($namespace [0] == "_") {
-            throw new CoolException ( 'You cannot start session with underscore.' );
+        if ($prefix [0] == "_" || preg_match ( '#(^[0-9])#i', $prefix [0] )) {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'You cannot start session with underscore or numbers.' );
         }
-        // should not start with numbers
-        if (preg_match ( '#(^[0-9])#i', $namespace [0] )) {
-            throw new CoolException ( 'Session should not start with numbers.' );
+        $this->_prefix = $prefix;
+        $config = Cool::$GC['session'];
+        $this->configure ( $config );
+        // 有配置driver时使用对应的库
+        if (!empty($config ['driver'])) {
+            $class = ucwords ( $config ['driver'] ) . 'Driver';
+            Cool::load_sys ( $class );
+            $hander = new $class ( $this->_prefix );
+            session_set_save_handler(
+                array(&$hander,"open"),
+                array(&$hander,"close"),
+                array(&$hander,"read"),
+                array(&$hander,"write"),
+                array(&$hander,"destroy"),
+                array(&$hander,"gc")
+            );
         }
-
-        $this->_namespace = $namespace;
-        if ($session_id != null) {
-            $this->set_id ( $session_id );
-        }
-        $this->start ();
-    }
-
-    /**
-     * Start session
-     *
-     * @return void
-     */
-    public function start() {
-        if ($this->_session_started == true) {
-            return;
-        }
-        if (! session_id ()) {
+            // // 启动session
+        if ($config ['start'] == true) {
+            ini_set ( 'session.auto_start', 1 );
             session_start ();
-        }
-        $_SESSION [$this->_namespace] ['session_id'] = $this->get_id ();
-        $this->_session_started = true;
-    }
-
-    /**
-     * check if session start
-     *
-     * @return boolean
-     */
-    public function is_start(){
-        if (isset($_SESSION)){
-            return true;
-        }else{
-            return false;
+            $this->_started = TRUE;
         }
     }
 
     /**
-     * Keeping a session open for a long operation causes subsequent requests from
-     * a user of that session having to wait for session's file to be freed.
-     * Therefore if you do not need the session anymore you can call this function
-     * to store the session and close the lock it has
-     *
-     * @return void
+     * 初始化Session配置数据
+     * @param unknown $configure
      */
-    public function stop() {
-        if ($this->_session_started == true) {
-            session_write_close ();
-            $this->_session_started = false;
+    private function configure ( $configure ) {
+        ini_set ( 'session.auto_start', 1 );
+        isset ( $configure ['name'] ) ? session_name ( $configure ['name'] ) : NULL;
+        isset ( $configure ['path'] ) ? session_save_path ( $configure ['path'] ) : NULL;
+        isset ( $configure ['domain'] ) ? ini_set ( 'session.cookie_domain', $configure ['domain'] ) : NULL;
+        if (isset ( $configure ['expires'] )) {
+            ini_set ( 'session.gc_maxlifetime', $configure ['expires'] );
+            ini_set ( 'session.cookie_lifetime', $configure ['expires'] );
         }
+        if (isset ( $configure ['use_trans_sid'] )) {
+            ini_set ( 'session.use_trans_sid', intval ( $configure ['use_trans_sid'] ) );
+        }
+        if (isset ( $configure ['use_cookies'] )) {
+            ini_set ( 'session.use_cookies', intval ( $configure ['use_cookies'] ) );
+        }
+        isset ( $configure ['cache_limiter'] ) ? session_cache_limiter ( $configure ['cache_limiter'] ) : NULL;
+        isset ( $configure ['cache_expire'] ) ? session_cache_expire ( $configure ['cache_expires'] ) : NULL;
     }
 
     /**
      * Set variable into session
-     *
      * @param string $name Name of key
      * @param mixed $value Value for keyname ($name)
      * @return void
      */
-    public function set_data($name, $value) {
+    public function set_data ( $name, $value = NULL ) {
         if ($name === "") {
-            throw new CoolException ( "Keyname should not be empty string!" );
+            return false;
         }
-        if (! $this->_session_started) {
-            throw new CoolException ( "Session not started." );
+        if ($this->_started == FALSE) {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'Session not started, use Session::start().' );
         }
         if ($value === null) {
-            unset ( $_SESSION [$this->_namespace] [$name] );
+            unset ( $_SESSION [$this->_prefix] [$name] );
         } else {
-            $_SESSION [$this->_namespace] [$name] = $value;
+            $_SESSION [$this->_prefix] [$name] = $value;
         }
     }
 
     /**
-     * Get variable from namespace by reference
-     *
+     * Get variable from prefix by reference
      * @param string $name if that variable doesnt exist returns null
-     *
      * @return mixed
      */
-    public function get_data($name) {
-        if (! $this->_session_started) {
-            throw new CoolException ( "Session not started, use Session::start()" );
-        }
+    public function get_data ( $name ) {
         if ($name == '') {
-            throw new CoolException ( "Name should not be empty" );
+            return false;
         }
-        if (! isset ( $_SESSION [$this->_namespace] [$name] )) {
+        if ($this->_started == FALSE) {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'Session not started, use Session::start().' );
+        }
+        if (! isset ( $_SESSION [$this->_prefix] [$name] )) {
             return null;
         } else {
-            return $_SESSION [$this->_namespace] [$name];
+            return $_SESSION [$this->_prefix] [$name];
         }
     }
 
     /**
-     * Get all variables from namespace in a array
-     *
+     * Get all variables from prefix in a array
      * @return array Variables from session
      */
-    public function get_all() {
-        if (isset ( $_SESSION [$this->_namespace] ) && is_array ( $_SESSION [$this->_namespace] )) {
-            return $_SESSION [$this->_namespace];
+    public function get_all ( ) {
+        if ($this->_started == FALSE) {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'Session not started, use Session::start().' );
+        }
+        if (isset ( $_SESSION [$this->_prefix] ) && is_array ( $_SESSION [$this->_prefix] )) {
+            return $_SESSION [$this->_prefix];
         } else {
             return array ();
         }
@@ -158,76 +138,72 @@ class Session {
 
     /**
      * Destroy all session data
-     *
      * @throws DooSessionException
      * @return void
      */
-    public function destroy() {
-        if (! $this->_session_started) {
-            throw new CoolException ( "Session not started." );
+    public function destroy ( ) {
+        if ($this->_started == FALSE) {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'Session not started, use Session::start().' );
         }
-        if (isset ( $_SESSION [$this->_namespace] )){
-            unset ( $_SESSION [$this->_namespace] );
+        if (isset ( $_SESSION [$this->_prefix] )) {
+            unset ( $_SESSION [$this->_prefix] );
         }
         session_destroy ();
-        $this->_session_started = false;
+        $this->_started = false;
     }
 
     /**
-     *  Unset whole session namespace or some value inside it
-     *
-     *  @param string $name If name is provided it will unset some value in session namespace
+     *  Unset whole session prefix or some value inside it
+     *  @param string $name If name is provided it will unset some value in session prefix
      *  if not it will unset session.
      */
-    public function namespace_unset($name = null) {
-        if (! $this->_session_started) {
-            throw new CoolException ( "Session not started, use Session::start()" );
+    public function prefix_unset ( $prefix = null ) {
+        if ($this->_started == FALSE) {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'Session not started, use Session::start().' );
         }
-        if (empty ( $name )) {
-            unset ( $_SESSION [$this->_namespace] );
-        } else {
-            unset ( $_SESSION [$this->_namespace] [$name] );
+        if ($prefix) {
+            $this->_prefix = $prefix;
         }
-    }
-
-    /**
-     * Get session id
-     * @return session_id
-     */
-    public function get_id() {
-        if (! isset ( $_SESSION )) {
-            throw new CoolException ( "Session not started, use Session::start()" );
+        if (isset ( $_SESSION [$this->_prefix] )) {
+            unset ( $_SESSION [$this->_prefix] );
         }
-        return session_id ();
+        return true;
     }
 
     /**
      * Sets session id
-     *
      * @param $id session identifier
      */
-    public function set_id($id) {
-        if (isset ( $_SESSION )) {
-            throw new CoolException ( "Session is already started, id must be set before." );
+    public function set_sessid ( $sess_id ) {
+        if ($this->_started == FALSE) {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'Session not started, use Session::start().' );
         }
-        if (! is_string ( $id ) || $id === '') {
-            throw new CoolException ( "Session id must be string and cannot be empty." );
-        }
-        if (headers_sent ( $filename, $linenum )) {
-            throw new CoolException ( "Headers already sent, output started at " . $filename . " on line " . $linenum );
+        if (! is_string ( $sess_id ) || $sess_id === '') {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'Session id must be string and cannot be empty.' );
         }
         session_id ( $id );
+    }
+
+    /**
+     * 获取SessionID
+     * @throws CoolException
+     */
+    public function get_sessid(){
+        if ($this->_started == FALSE) {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'Session not started, use Session::start().' );
+        }
+        return session_id();
     }
 
     /**
      * Check if CoolSession variable is stored
      * @return bool
      */
-    public function has($name) {
-        if (!$this->_session_started) {
-            throw new CoolException("Session not started, use Session::start()");
+    public function exists ( $name ) {
+        if ($this->_started == FALSE) {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'Session not started, use Session::start().' );
         }
-        if (isset($_SESSION[$this->_namespace][$name])) {
+        if (isset ( $_SESSION [$this->_prefix] [$name] )) {
             return true;
         } else {
             return false;
@@ -238,12 +214,12 @@ class Session {
      * Unset CoolSession variable
      * @return bool
      */
-    public function remove($name) {
-        if (! $this->_session_started) {
-            throw new CoolException ( "Session not started, use Session::start()" );
+    public function remove ( $name ) {
+        if ($this->_started == FALSE) {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'Session not started, use Session::start().' );
         }
-        if (isset ( $_SESSION [$this->_namespace] [$name] )) {
-            unset ( $_SESSION [$this->_namespace] [$name] );
+        if (isset ( $_SESSION [$this->_prefix] [$name] )) {
+            unset ( $_SESSION [$this->_prefix] [$name] );
             return true;
         }
         return false;

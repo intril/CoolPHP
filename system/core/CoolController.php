@@ -90,7 +90,7 @@ abstract class CoolController {
     public function to_json($data = array()){
         header('Content-Type:application/json; charset=utf-8');
         if (is_array($data)){
-            echo json_encode($data);
+            echo json_encode($data, JSON_UNESCAPED_UNICODE);
         }else{
             echo $data;
         }

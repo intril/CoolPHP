@@ -9,6 +9,13 @@
  * @author      Intril.Leng <jj.comeback@gmail.com>
  */
 class Router {
+
+    /**
+     * 当前请求的Router中的URI
+     * @var unknown
+     */
+    public static $current_uri;
+
     /**
      * 解析访问进来的URI. 返回App需要访问的目录 控制器 和 方法
      *
@@ -17,8 +24,9 @@ class Router {
      */
     public static function parse ( $route_arr ) {
         $route_result = array();
-        $request_uri = self::_get_request_uri();
-        if ( $request_uri == '' || $request_uri == '/' ) {
+//         $request_uri = self::_get_request_uri();
+        self::$current_uri = self::_get_request_uri();
+        if ( self::$current_uri == '' || self::$current_uri == '/' ) {
             if ( isset( $route_arr['/'] ) ) {
                 return $route_arr['/'];
             } else {
@@ -27,7 +35,7 @@ class Router {
         }
         if ( Cool::$GC['auto_route'] == true ) { // 自动路由时
             $folder = '/';
-            $uri_arr = explode( '/', trim( $request_uri, '/' ) );
+            $uri_arr = explode( '/', trim( self::$current_uri, '/' ) );
             if ( count( $uri_arr ) <= 2 ) {
                 $route_result = array( $uri_arr[0], isset($uri_arr[1]) ? $uri_arr[1] : 'index' );
             } else {
@@ -46,14 +54,13 @@ class Router {
             if ($folder != '/'){
                 $route_result[2] = $folder;
             }
-            $route_result[3] = substr($request_uri, strlen($folder . $route_result[0] .'/'. $route_result[1]));
+            $route_result[3] = substr(self::$current_uri, strlen($folder . $route_result[0] .'/'. $route_result[1]));
             $route_result[0] = ucfirst( $route_result[0] ) . 'Controller';
         } else { // 按route.conf.php里面绝对路由时
-            if ( isset( $route_arr[$request_uri] ) ) {
-                $route_result = $route_arr[$request_uri];
-            } else {
-                throw new CoolException( CoolException::ERR_INVALID_REQUEST, 'router is not found in routes.conf.php ' . $request_uri );
+            if ( !isset( $route_arr[self::$current_uri] ) ) {
+                self::$current_uri = '/page_404';
             }
+            $route_result = $route_arr[self::$current_uri];
         }
         return $route_result;
     }
@@ -96,7 +103,7 @@ class Router {
      *
      * @return string
      */
-    public static function current_uri () {
+    public static function request_uri () {
         return self::_get_request_uri();
     }
 

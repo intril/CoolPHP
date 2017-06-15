@@ -28,6 +28,7 @@ abstract class CoolModel {
             'order_by'  => '',              // 默认Order by
             'limit'     => '',              // 默认limit
             'data'      => '',              // 默认Data
+            'data_sql'  => '',              // 默认Data Sql
             'ignore'    => '',              // INSERT时的INGNORE
     );
     // 最后一次的SQL语句
@@ -74,7 +75,7 @@ abstract class CoolModel {
      */
     public function connect ( $database = NULL ) {
         if (is_file ( APP_PATH . 'config/db.conf.php' )) {
-            include_once APP_PATH . 'config/db.conf.php';
+            include APP_PATH . 'config/db.conf.php';
         } else {
             throw new CoolException ( CoolException::ERR_SYSTEM, 'Database Config File Is Not Found!' );
         }
@@ -121,7 +122,7 @@ abstract class CoolModel {
      * @return array        找到记录时返回一个二维数组,否则返回空数组
      */
     public function find_all ( ) {
-        $sql = 'SELECT ' . $this->_query ['fields'] . ' FROM ' . $this->_query ['table'] . $this->_query ['join'] . $this->_query ['where'] . $this->_query ['group_by'] . $this->_query ['order_by'] . $this->_query ['limit'];
+        $sql = 'SELECT ' . $this->_query ['fields'] . ' FROM ' . $this->table . $this->_query ['join'] . $this->_query ['where'] . $this->_query ['group_by'] . $this->_query ['order_by'] . $this->_query ['limit'];
         // 重置所有的属性
         $this->_reset_sql ( $sql );
         return $this->DH ()->get_all ( $sql );
@@ -129,19 +130,22 @@ abstract class CoolModel {
 
     /**
      * 获取一条记录
+     *  这里有处理缓存穿透，但要在新增的时候对相应的缓存进行一次请理。
      * @param unknown $cache_name   缓存名称
      * @param unknown $rkey         缓存前缀
      * @param number $expire        过期时间
      */
     public function find_one ( $cache_name = NULL, $rkey = NULL, $expire = 0 ) {
         $return = NULL;
-        if ($cache_name) { // 需要从Cache里面查询时 此处要防Redis穿透
+        if ($cache_name != NULL) {
             $return = $this->redis ( $cache_name )->get ( $rkey, $expire );
+            if (! empty ( $return )) { // 存在缓存Key时，不读DB直接返回
+                $this->redis ( $cache_name )->set ( $rkey, $return, $expire );
+                return $return;
+            }
         }
-        if ($return) { // 取过Cache则不取DB
-            return $return;
-        }
-        $sql = 'SELECT ' . $this->_query ['fields'] . ' FROM ' . $this->_query ['table'] . $this->_query ['join'] . $this->_query ['where'] . $this->_query ['group_by'] . $this->_query ['order_by'] . ' LIMIT 0, 1';
+        // 不在缓存取DB
+        $sql = 'SELECT ' . $this->_query ['fields'] . ' FROM ' . $this->table . $this->_query ['join'] . $this->_query ['where'] . $this->_query ['group_by'] . $this->_query ['order_by'] . ' LIMIT 0, 1';
         // 重置所有的属性
         $this->_reset_sql ( $sql );
         $return = $this->DH ()->get_one ( $sql );
@@ -153,48 +157,55 @@ abstract class CoolModel {
 
     /**
      * 插入记录
-     * @param unknown $cache_name       缓存名称
-     * @param unknown $rkey             缓存前缀
-     * @param number $expire            过期时间
-     * @param unknown $primary_key_pre  主建缓存前缀
      */
-    public function insert ( $cache_name = NULL, $rkey = NULL, $expire = 0, $primary_key_pre = NULL ) {
-        $sql = 'INSERT ' . $this->_query['ignore'] . ' INTO ' . $this->_query['table'] . ' SET '.$this->_query['data'] . $this->_query['duplicate'];
+    public function insert ( ) {
+        $sql = 'INSERT ' . $this->_query['ignore'] . ' INTO ' . $this->table . ' SET '.$this->_query['data_sql'] . $this->_query['duplicate'];
         // 重置所有的属性
         $this->_reset_sql ( $sql );
-        if ($this->DH ()->query ( $sql ) !== FALSE) {
+        $result = $this->DH ()->query ( $sql );
+        if ($result !== FALSE) {
             $insert_id = $this->DH ()->insert_id ();
-            if ($primary_key_pre) {
-                $rkey [] = $primary_key_pre . $insert_id;
-            }
-            if ($cache_name) { // 需要设置到Cache时
-                $this->redis ( $cache_name )->set ( $rkey, $this->data, $expire );
-            }
-            return $insert_id;
+            return $insert_id ? $insert_id : $result;
         } else {
             return FALSE;
         }
     }
 
     /**
-     * 更新记录
-     * @param unknown $cache_name       缓存名称
-     * @param unknown $rkey             缓存前缀
-     * @param number $expire            过期时间
+     * 更新记录 同时删除指定的缓存Key
+     * @param unknown $cache_name
+     * @param unknown $rkey
+     * @return unknown
      */
-    public function update ( $cache_name = NULL, $rkey = NULL, $expire = 0 ) {
-        $sql = 'UPDATE ' . $this->_query ['table'] . ' SET ' . $this->_query['data'] . $this->_query ['where'];
+    public function update ( $cache_name = NULL, $rkey = NULL ) {
+        if ($this->_query['where'] == null) {
+            throw new CoolException ( CoolException::ERR_SYSTEM, 'Can not Delete All data' );
+        }
+        $sql = 'UPDATE ' . $this->table . ' SET ' . $this->_query['data_sql'] . $this->_query ['where'];
         // 重置所有的属性
         $this->_reset_sql ( $sql );
         $return = $this->DH ()->query ( $sql );
-        if ($return !== FALSE) {
-            if ($cache_name) { // 需要设置到Cache时
-                $this->redis ( $cache_name )->set ( $rkey, $this->data, $expire );
+        if ($cache_name != NULL) {
+            if (is_array ( $rkey )) {
+                foreach ( $rkey as $key ) {
+                    $this->redis ( $cache_name )->rm ( $key );
+                }
+            } else {
+                $this->redis ( $cache_name )->rm ( $rkey );
             }
-            return $return;
-        } else {
-            return FALSE;
         }
+        return $return;
+    }
+
+    /**
+     * Replace更新
+     */
+    public function replace ( ) {
+        $sql = 'REPLACE INTO ' . $this->table . ' SET ' . $this->_query ['data_sql'];
+        // 重置所有的属性
+        $this->_reset_sql ( $sql );
+        $return = $this->DH ()->query ( $sql );
+        return $return;
     }
 
     /**
@@ -204,10 +215,10 @@ abstract class CoolModel {
      * @throws CoolException
      */
     public function delete ( $cache_name = NULL, $rkey = NULL ) {
-        if ($this->where == null) {
+        if ($this->_query['where'] == null) {
             throw new CoolException ( CoolException::ERR_SYSTEM, 'Can not Delete All data' );
         }
-        $sql = 'DELETE FROM ' . $this->_query['table'] . $this->_query['where'];
+        $sql = 'DELETE FROM ' . $this->table . $this->_query['where'];
         // 重置所有的属性
         $this->_reset_sql ( $sql );
         if ($cache_name) { // 需要设置到Cache时
@@ -221,7 +232,7 @@ abstract class CoolModel {
      * @return string
      */
     public function count ( ) {
-        $sql = 'SELECT COUNT(' . $this->_query['fields'] . ') FROM ' . $this->_query['table'] . $this->_query['join'] . $this->_query['where'] . $this->_query['group_by'] . $this->_query['order_by'];
+        $sql = 'SELECT COUNT(' . $this->_query['fields'] . ') FROM ' . $this->table . $this->_query['join'] . $this->_query['where'] . $this->_query['group_by'] . $this->_query['order_by'];
         // 重置所有的属性
         $this->_reset_sql ( $sql );
         return $this->DH ()->count ( $sql );
@@ -232,7 +243,7 @@ abstract class CoolModel {
      * @return Ambigous <number, array/FALSE>
      */
     public function max ( ) {
-        $sql = 'SELECT MAX(' . $this->_query['fields'] . ') as max FROM ' . $this->_query['table'] . $this->_query['join'] . $this->_query['where'] . $this->_query['group_by'] . $this->_query['order_by'];
+        $sql = 'SELECT MAX(' . $this->_query['fields'] . ') as max FROM ' . $this->table . $this->_query['join'] . $this->_query['where'] . $this->_query['group_by'] . $this->_query['order_by'];
         // 重置所有的属性
         $this->_reset_sql ( $sql );
         $return = $this->DH ()->get_one ( $sql );
@@ -256,7 +267,7 @@ abstract class CoolModel {
      * @return  $this
      */
     public function table ( $table ) {
-        $this->_query['table'] = $this->_parse_field($table);
+        $this->table = $this->_parse_field ( $table );
         return $this;
     }
 
@@ -282,29 +293,41 @@ abstract class CoolModel {
      * @return  Model
      */
     public function where ( $where ) {
-        $where_str = '';
         if (is_string ( $where )) {
             $where_str = empty ( $where ) ? '' :  $where;
         }else{
-            $operate = isset ( $where ['_logic'] ) ? strtoupper ( $where ['_logic'] ) : '';
-            if (in_array ( $operate, array ( 'AND', 'OR', 'XOR' ) )) {
-                $operate = ' ' . $operate . ' ';
-                unset ( $where ['_logic'] );
-            } else {
-                $operate = ' AND ';
-            }
-            foreach ( $where as $key => $val ) {
-                if ($key === '_string') {
-                    $where_str .= '( ' . $val . ' )';
-                }else{ // 多条件支持
-                    $where_str .= $this->parse_where_item ( trim ( $key ), $val );
-                }
-                $where_str .= $operate;
-            }
-            $where_str = substr ( $where_str, 0, - strlen ( $operate ) );
+            $where_str = $this->parse_complex_where ( $where );
         }
         $this->_query['where'] = empty ( $where_str ) ? '' : ' WHERE ' . $where_str;
         return $this;
+    }
+
+    /**
+     * 处理复杂查询
+     * @param unknown $where_arr
+     * @return string
+     */
+    private function parse_complex_where( $where_arr ){
+        $where_str = '';
+        $operate = isset ( $where_arr ['_logic'] ) ? strtoupper ( $where_arr ['_logic'] ) : '';
+        if (in_array ( $operate, array ( 'AND', 'OR', 'XOR' ) )) {
+            $operate = ' ' . $operate . ' ';
+            unset ( $where_arr ['_logic'] );
+        } else {
+            $operate = ' AND ';
+        }
+        foreach ( $where_arr as $key => $val ) {
+            if ($key === '_string') {
+                $where_str .= '( ' . $val . ' )';
+            } else if ($key === '_complex') {
+                $where_str .= '( ' . $this->parse_complex_where ( $val, FALSE ) . ' )';
+            } else {  // 多条件支持
+                $where_str .= $this->parse_where_item ( trim ( $key ), $val );
+            }
+            $where_str .= $operate;
+        }
+        $where_str = substr ( $where_str, 0, - strlen ( $operate ) );
+        return $where_str;
     }
 
     /**
@@ -351,10 +374,10 @@ abstract class CoolModel {
                     $where_str .= $key . ' ' . $this->_exp [$exp] . ' (' . $zone . ')';
                 }
             } elseif (preg_match ( '/^(notbetween|not between|between)$/', $exp )) { // BETWEEN运算
-                $data = is_string ( $val [1] ) ? explode ( ',', $val [1] ) : $val [1];
-                $where_str .= $key . ' ' . $this->_exp [$exp] . ' ' . $this->_parse_value ( $data [0] ) . ' AND ' . $this->_parse_value ( $data [1] );
+                $where_str .= $key . ' ' . $this->_exp [$exp] . ' ' . $this->_parse_value ( $val [1] ) . ' AND ' . $this->_parse_value ( $val [2] );
             } else {
-                throw new CoolException ( CoolException::ERR_SYSTEM, 'sql is error' );
+                $where_str .= $key . ' ' . $exp . ' ' . $this->_parse_value ( $val [1] );
+//                 throw new CoolException ( CoolException::ERR_SYSTEM, 'sql is error' );
             }
         } else {
             $count = count ( $val );
@@ -444,7 +467,8 @@ abstract class CoolModel {
      * @return CoolModel
      */
     public function data ( $data ) {
-        $this->_query['data'] = $this->_make_data ( $data );
+        $this->_query['data_sql'] = $this->_make_data ( $data );
+        $this->_query['data'] = $data;
         return $this;
     }
 
@@ -503,6 +527,7 @@ abstract class CoolModel {
                 'order_by'  => '',              // 默认Order by
                 'limit'     => '',              // 默认limit
                 'data'      => '',              // 默认Data
+                'data_sql'  => '',              // 默认Data SQL
                 'ignore'    => '',              // INSERT时的INGNORE
         );
         // 存储起来,方便调试
@@ -517,11 +542,11 @@ abstract class CoolModel {
      */
     private function _parse_value ( $value ) {
         if (is_string ( $value )) {
-            $value = strpos ( $value, ':' ) === 0 && in_array ( $value, array_keys ( $this->bind ) ) ? addslashes ( $value ) : '\'' . addslashes ( $value ) . '\'';
+            $value = '\'' . addslashes ( $value ) . '\'';
         } elseif (isset ( $value [0] ) && is_string ( $value [0] ) && strtolower ( $value [0] ) == 'exp') {
             $value = addslashes ( $value [1] );
         } elseif (is_array ( $value )) {
-            $value = array_map ( array ( $this, 'parse_value' ), $value );
+            $value = array_map ( array ( $this, '_parse_value' ), $value );
         } elseif (is_bool ( $value )) {
             $value = $value ? '1' : '0';
         } elseif (is_null ( $value )) {

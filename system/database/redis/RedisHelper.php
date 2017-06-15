@@ -69,6 +69,7 @@ class RedisHelper {
                 self::$_object [$this->cache_name] = new Redis ();
                 $func = $this->conf [$this->cache_name] ['persistent'] ? 'pconnect' : 'connect';
                 self::$_object [$this->cache_name]->$func ( $this->conf [$this->cache_name] ['host'], $this->conf [$this->cache_name] ['port'], $this->_timeout );
+                // auth
                 if (isset ( $this->conf [$this->cache_name] ['auth'] )) {
                     self::$_object [$this->cache_name]->auth ( $this->conf [$this->cache_name] ['auth'] );
                 }
@@ -79,12 +80,21 @@ class RedisHelper {
     }
 
     /**
+     * 返回当前连接的Config
+     */
+    public function configure ( ) {
+        return $this->conf;
+    }
+
+    /**
      * 动态调用Redis库方法
      * @param $op
      * @param $params
      * @return mixed
      */
     public function exec ( $op, $params ) {
+        // select db
+        self::$_object [$this->cache_name]->select ( $this->conf [$this->cache_name] ['db'] );
         if ( is_array ( $params ) ) {
             return call_user_func_array ( array( self::$_object[$this->cache_name], $op ), $params );
         } else {
@@ -99,6 +109,8 @@ class RedisHelper {
      * @return mixed
      */
     public function get ( $name, $expire = 0 ) {
+        // select db
+        self::$_object [$this->cache_name]->select ( $this->conf [$this->cache_name] ['db'] );
         $value = self::$_object [$this->cache_name]->get ( $name );
         $json_data = json_decode ( $value, true );
         if (is_int ( $expire ) && $expire > 0) {
@@ -117,6 +129,8 @@ class RedisHelper {
      * @return boolean
      */
     public function set ( $name, $value, $expire = 0 ) {
+        // select db
+        self::$_object [$this->cache_name]->select ( $this->conf [$this->cache_name] ['db'] );
         // 对数组/对象数据进行缓存处理，保证数据完整性
         $value = (is_object ( $value ) || is_array ( $value )) ? json_encode ( $value ) : $value;
         if (is_int ( $expire ) && $expire) {
@@ -134,6 +148,8 @@ class RedisHelper {
      * @return boolean
      */
     public function rm ( $name ) {
+        // select db
+        self::$_object [$this->cache_name]->select ( $this->conf [$this->cache_name] ['db'] );
         return self::$_object [$this->cache_name]->delete ( $name );
     }
 
@@ -143,6 +159,8 @@ class RedisHelper {
      * @return boolean
      */
     public function clear() {
+        // select db
+        self::$_object [$this->cache_name]->select ( $this->conf [$this->cache_name] ['db'] );
         return self::$_object [$this->cache_name]->flushDB();
     }
 
@@ -158,12 +176,14 @@ class RedisHelper {
         if (empty ( $value )) {
             return false;
         }
+        // select db
+        self::$_object [$this->cache_name]->select ( $this->conf [$this->cache_name] ['db'] );
         $value = is_array ( $value ) ? json_encode ( $value ) : $value;
         $write = self::$_object[$this->cache_name]->rPush ( $queue_name, $value );
         // 写入后超出队列长度，进行lTrim删除掉最早进来的队列数据
         if ($write > $this->conf [$this->cache_name] ['max_length']) {
-            $length = $write - $host ['max_length'];
-            self::$_object[$this->cache_name]->lTrim($key, $length, -1);
+            $length = $write - $this->conf [$this->cache_name] ['max_length'];
+            self::$_object[$this->cache_name]->lTrim($value, $length, -1);
             return false;
         }
         return $write;
@@ -179,6 +199,8 @@ class RedisHelper {
         if (empty ( $queue_name )) {
             return false;
         }
+        // select db
+        self::$_object [$this->cache_name]->select ( $this->conf [$this->cache_name] ['db'] );
         $return = self::$_object [$this->cache_name]->lPop ( $queue_name );
         $result = json_decode ( $return, true );
         if ($result === NULL) {

@@ -79,42 +79,37 @@ class Cool {
     public static function start ( $config ) {
         // 初始化部分
         self::_init( $config );
-
-        if ( PHP_SAPI == 'cli' ) {
-            self::_start_cli();
-        } else {
-            $route_result = Router::parse( self::$_route );
-            if ( empty( $route_result ) ) {
-                throw new CoolException( CoolException::ERR_INVALID_REQUEST, 'Invalid Router :' . json_encode( $route_result ) );
-            }
-            // 检查是否有子目录
-            if ( isset( $route_result[2] ) ) {
-                list( $controller, $action, $folder ) = $route_result;
-                $class_folder = 'controller' . $folder;
-            } else {
-                list( $controller, $action ) = $route_result;
-                $class_folder = 'controller';
-            }
-            // 加载App控制器
-            self::auto_load( $controller, $class_folder );
-            // 检查类是否存在
-            if ( !class_exists( $controller, false ) ) {
-                throw new CoolException( CoolException::ERR_SYSTEM, 'Controller has not Class ' . $controller );
-            }
-            // 检查控制器下是否存在方法
-            if ( !method_exists( $controller, $action ) ) {
-                throw new CoolException( CoolException::ERR_SYSTEM, 'Controller ' . $controller . ' has not method ' . $action );
-            }
-            // call function
-            $obj = new $controller();
-            // 检查是否有uri参数
-            if ( isset( $route_result[3] ) ) {
-                $obj->params = $route_result[3];
-            }
-            $obj->before( $controller, $action );
-            $obj->$action ();
-            $obj->after( $controller, $action );
+        $route_result = Router::parse( self::$_route );
+        if ( empty( $route_result ) ) {
+            throw new CoolException( CoolException::ERR_INVALID_REQUEST, 'Invalid Router :' . json_encode( $route_result ) );
         }
+        // 检查是否有子目录
+        if ( isset( $route_result[2] ) ) {
+            list( $controller, $action, $folder ) = $route_result;
+            $class_folder = 'controller' . $folder;
+        } else {
+            list( $controller, $action ) = $route_result;
+            $class_folder = 'controller';
+        }
+        // 加载App控制器
+        self::auto_load( $controller, $class_folder );
+        // 检查类是否存在
+        if ( !class_exists( $controller, false ) ) {
+            throw new CoolException( CoolException::ERR_SYSTEM, 'Controller has not Class ' . $controller );
+        }
+        // 检查控制器下是否存在方法
+        if ( !method_exists( $controller, $action ) ) {
+            throw new CoolException( CoolException::ERR_SYSTEM, 'Controller ' . $controller . ' has not method ' . $action );
+        }
+        // call function
+        $obj = new $controller();
+        // 检查是否有uri参数
+        if ( isset( $route_result[3] ) ) {
+            $obj->params = $route_result[3];
+        }
+        $obj->before( $controller, $action );
+        $obj->$action ();
+        $obj->after( $controller, $action );
     }
 
     /**
@@ -136,115 +131,17 @@ class Cool {
     }
 
     /**
-     * 运行命令行脚本，可以按route.conf.php里面有cli的配置运行，也可以自定义方式运行
-     * ie. php run.php shortcut where $route['cli']['shortcut'] = array('ControllerName', 'ActionName');]
-     * ie. php run.php -r=MyController:functionName
-     *
-     * @return void
-     */
-    private static function _start_cli () {
-        $argv = self::_read_args();
-        if ( isset ( $argv [0] ) ) { // ie. php run.php shortcut where $route['cli']['shortcut'] = array('ControllerName', 'ActionName');]
-            if ( isset ( self::$_route [$argv [0]] ) ) {
-                $controller = self::$_route[$argv[0]][0];
-                $action = self::$_route[$argv[0]][1];
-            } else {
-                echo "Could not find the route specified.\n";
-                exit();
-            }
-        } else if ( isset ( $argv ['r'] ) && strpos( $argv ['r'], ':' ) !== false ) { // ie. php run.php -r=ControllerName:functionName
-            $parts = explode( ':', $argv ['r'] );
-            $controller = $parts[0];
-            $action = $parts[1];
-        } else {
-            echo "Could not find the route specified.\n";
-            exit();
-        }
-        // load controller
-        self::auto_load( $controller, 'controller' );
-        $controller = new $controller ();
-        if ( method_exists( $controller, $action ) ) {
-            $controller->params = $argv;
-            return $controller->$action ();
-        } else {
-            self::_exit_app( 1, "Could not find specified action" );
-        }
-    }
-
-    /**
-     * Exit the application
-     *
-     * @param int    $code    Exit code from 0 to 255
-     * @param string $message Message to display on exit
-     */
-    private static function _exit_app ( $code = 0, $message = null ) {
-        if ( $message !== null ) {
-            echo $message . "\n";
-            exit();
-        }
-        if ( $code < 0 || $code > 255 ) {
-            $code = 1;
-        }
-        exit ( $code );
-    }
-
-    /**
-     * Read arguments provided on Command Line and return them in an array
-     * Supprts flags, switchs and other arguments
-     * Flags ie. --foo=bar will come out as $out['foo'] = 'bar'
-     * Switches ie. -ab will come out as $out['a'] = true, $out['b'] = true
-     *          OR IF -a=123 will come out as $out['a'] = 123
-     * Other Args ie. one.txt two.txt will come out as $out[0] = 'one.txt', $out[1] = 'two.txt'
-     * Function from : http://www.php.net/manual/en/features.commandline.php#93086
-     *
-     * @return array The arguments in a formatted array
-     */
-    private static function _read_args () {
-        $args = $_SERVER['argv'];
-        array_shift( $args ); // Remove the file name
-        $out = array();
-        foreach ( $args as $arg ) {
-            if ( substr( $arg, 0, 2 ) == '--' ) { // Got a 'switch' (ie. --DEBUG_MODE=false OR --verbose)
-                $eqPos = strpos( $arg, '=' ); // Has a value
-                if ( $eqPos === false ) {
-                    $key = substr( $arg, 2 );
-                    $out[$key] = isset( $out[$key] ) ? $out[$key] : true;
-                } else {
-                    $key = substr( $arg, 2, $eqPos - 2 );
-                    $out[$key] = substr( $arg, $eqPos + 1 );
-                }
-            } else if ( substr( $arg, 0, 1 ) == '-' ) { // Got an argument (ie. -h OR -cfvr [shorthand for -c -f -v -r] OR -i=123)
-                if ( substr( $arg, 2, 1 ) == '=' ) {
-                    $key = substr( $arg, 1, 1 );
-                    $out[$key] = substr( $arg, 3 );
-                } else {
-                    $chars = str_split( substr( $arg, 1 ) );
-                    foreach ( $chars as $char ) {
-                        $key = $char;
-                        $out[$key] = isset( $out[$key] ) ? $out[$key] : true;
-                    }
-                }
-            } else { // Just an argument ie (foo bar me.txt)
-                $out[] = $arg;
-            }
-        }
-        return $out;
-    }
-
-    /**
      * start session
      *
      * @return Session
      */
-    public static function session ( $namespace = NULL ) {
-        if ($namespace == NULL) {
-            $namespace = Cool::$GC ['session'] ['namespace'];
-        }
-        if (empty ( self::$_session [$namespace] ) && isset ( Cool::$GC ['session'] ['start'] ) && Cool::$GC ['session'] ['start'] == true) {
+    public static function session ( $prefix = NULL ) {
+        $prefix = empty ( $prefix ) ? 'COOLPHP' : $prefix;
+        if (empty ( self::$_session  ) && Cool::$GC ['session'] ['start'] == true) {
             self::load_sys ( 'Session' );
-            self::$_session [$namespace] = new Session ( $namespace );
+            self::$_session = new Session ( $prefix );
         }
-        return self::$_session [$namespace];
+        return self::$_session;
     }
 
     /**
@@ -320,21 +217,24 @@ class Cool {
      * @throws CoolException
      */
     public static function vendor( ){
-        // 获取传入来的参数
+            // 获取传入来的参数
         $args = func_get_args ();
         if (count ( $args ) < 2) {
             throw new CoolException ( CoolException::ERR_SYSTEM, 'args is not enought!' );
         }
         // 没有初始化时 初始化
-        if (empty ( self::$_helper [$args[1].'/'.$args[0]] )) {
-            Cool::auto_load($args[0], $args[1]);
-            if (!class_exists($args[0])) {
-                throw new CoolException (CoolException::ERR_SYSTEM, 'Class:'. $args[1].'/'.$args[0].' is Not Found!');
+        $class = $args [0];
+        $folder = $args [1];
+        if (empty ( self::$_helper [$folder . '/' . $class] )) {
+            Cool::auto_load ( $class, $folder );
+            if (! class_exists ( $class )) {
+                throw new CoolException ( CoolException::ERR_SYSTEM, 'Class:' . $folder . '/' . $class . ' is Not Found!' );
             }
-            $object = new ReflectionClass ( $args[0] );
-            self::$_helper [$args[1].'/'.$args[0]] = $object->newInstanceArgs ( $args );
+            $object = new ReflectionClass ( $class );
+            unset($args[0], $args[1]);
+            self::$_helper [$folder . '/' . $class] = $object->newInstanceArgs ( $args );
         }
-        return self::$_helper [$args[1].'/'.$args[0]];
+        return self::$_helper [$folder . '/' . $class];
     }
 
     /**
@@ -376,6 +276,9 @@ class Cool {
         $class = array(
             // core
             'Session'      => 'core/',
+            'RedisDriver' => 'core/Session/',
+            'DatabaseDriver' => 'core/Session/',
+
             // mysql
             'MySQLHelper'  => 'database/mysql/',
             'MySQLiHelper' => 'database/mysql/',

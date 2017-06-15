@@ -101,6 +101,9 @@ class CoolException extends Exception {
         } else {
             $msg = $format;
         }
+        if (method_exists ( 'ApiMonitor', 'send_error_log' )) {
+            ApiMonitor::send_error_log ( 'GSFinminer', Cool::session ()->get_data ( 'uid' ), Router::$current_uri, 5, $code, $msg );
+        }
         // 调用父类的构造函数
         parent::__construct($msg, $code);
     }
